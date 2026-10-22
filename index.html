@@ -1,0 +1,1137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PlotterSim — Pen Plotter Simulator</title>
+<meta name="description" content="Turn any image into a pen-plotter drawing video: outlines first, then marker fill, stroke by stroke. Runs 100% in your browser — images never leave your device.">
+<style>
+  :root{
+    --bg:#10131a; --panel:#1a1f2b; --panel2:#232a3a; --line:#303a52;
+    --text:#eef1f8; --muted:#9aa6bf; --accent:#ffb020; --accent2:#ff5d8f;
+    --good:#3ddc84;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--text);
+    font-family:ui-rounded,"Segoe UI",system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif}
+  header{padding:18px 20px 6px;max-width:1280px;margin:0 auto}
+  h1{font-size:30px;margin:0;letter-spacing:.3px}
+  h1 .sim{color:var(--accent)}
+  .tag{color:var(--muted);margin:6px 0 0;font-size:15px;line-height:1.45}
+  .tag b{color:var(--text)}
+  main{max-width:1280px;margin:0 auto;padding:14px 20px 30px;
+    display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:18px}
+  @media (max-width:900px){ main{grid-template-columns:1fr} }
+  .stageWrap{background:linear-gradient(180deg,#171b26,#0c0f16);border:1px solid var(--line);
+    border-radius:18px;padding:14px;display:flex;flex-direction:column;gap:12px}
+  canvas#stage{width:100%;height:auto;display:block;border-radius:12px;background:#0a0c11;
+    touch-action:manipulation}
+  .transport{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  button{appearance:none;border:1px solid var(--line);background:var(--panel2);color:var(--text);
+    border-radius:12px;padding:11px 16px;font-size:15px;font-weight:650;cursor:pointer;min-height:46px}
+  button:hover{border-color:var(--accent)}
+  button:active{transform:translateY(1px)}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#231a00}
+  button.pink{background:var(--accent2);border-color:var(--accent2);color:#2b0714}
+  button:disabled{opacity:.45;cursor:not-allowed;transform:none}
+  .progress{height:10px;background:#0a0c11;border:1px solid var(--line);border-radius:99px;overflow:hidden}
+  .progress>i{display:block;height:100%;width:0%;background:linear-gradient(90deg,var(--accent),var(--accent2))}
+  .status{font-size:14px;color:var(--muted);min-height:20px}
+  .status b{color:var(--text)}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:16px;
+    display:flex;flex-direction:column;gap:16px;height:fit-content}
+  .panel h2{font-size:13px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);margin:0 0 8px}
+  .group{border-bottom:1px dashed var(--line);padding-bottom:14px}
+  .group:last-child{border-bottom:none;padding-bottom:0}
+  label.row{display:flex;justify-content:space-between;font-size:14px;margin:8px 0 4px;color:var(--text)}
+  label.row output{color:var(--accent);font-weight:700}
+  input[type=range]{width:100%;accent-color:var(--accent);height:32px}
+  select,input[type=text]{width:100%;background:var(--panel2);color:var(--text);border:1px solid var(--line);
+    border-radius:10px;padding:10px;font-size:15px;min-height:44px}
+  .drop{border:2px dashed var(--line);border-radius:14px;padding:16px;text-align:center;color:var(--muted);
+    font-size:14px;line-height:1.5;cursor:pointer}
+  .drop.over{border-color:var(--accent);color:var(--text)}
+  .drop b{color:var(--accent)}
+  .samples{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+  .samples button{padding:9px 4px;font-size:13px;min-height:44px}
+  .palette{display:flex;gap:6px;flex-wrap:wrap;min-height:26px}
+  .palette .sw{width:26px;height:26px;border-radius:8px;border:2px solid rgba(255,255,255,.25)}
+  .hint{font-size:12.5px;color:var(--muted);line-height:1.5}
+  .wide{width:100%}
+  footer{max-width:1280px;margin:0 auto;padding:0 20px 26px;color:var(--muted);font-size:13px;line-height:1.6}
+  kbd{background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:1px 6px}
+</style>
+</head>
+<body>
+<header>
+  <h1>🖊️ Plotter<span class="sim">Sim</span></h1>
+  <p class="tag">Feed it an image. It draws the <b>outlines first, colour by colour</b>, then <b>fills everything in like a real marker</b> — back-and-forth strokes, pen lifts, pen swaps and all. Built for making those oddly-satisfying plotter videos. <b>100% in your browser — your images never leave your device.</b></p>
+</header>
+
+<main>
+  <section class="stageWrap">
+    <canvas id="stage" width="1080" height="1080"></canvas>
+    <div class="progress"><i id="bar"></i></div>
+    <div class="status" id="status">Loading a demo drawing…</div>
+    <div class="transport">
+      <button id="btnPlay" class="primary">▶ Play</button>
+      <button id="btnRestart">↺ Restart</button>
+      <button id="btnFinish">⏩ Finish now</button>
+      <button id="btnRecord" class="pink">● Record video</button>
+      <button id="btnPng">⬇ Final PNG</button>
+    </div>
+    <p class="hint">Tip: hit <b>Record video</b> and it replays the whole drawing at exactly the length you pick below, then downloads the video — ready to post. Chrome/Edge record MP4 where supported, otherwise WebM (TikTok's web uploader accepts both).</p>
+  </section>
+
+  <aside class="panel">
+    <div class="group">
+      <h2>1 · Your image</h2>
+      <div class="drop" id="drop">
+        <b>Tap to choose an image</b><br>or drag &amp; drop it anywhere on this page<br>
+        <span style="font-size:12px">Flat, cartoony / anime art works best</span>
+      </div>
+      <input type="file" id="file" accept="image/*" hidden>
+      <div style="height:10px"></div>
+      <h2>…or try a built-in demo</h2>
+      <div class="samples">
+        <button data-sample="star">⭐ Star</button>
+        <button data-sample="berry">🍓 Berry</button>
+        <button data-sample="rocket">🚀 Rocket</button>
+        <button data-sample="landscape">🏔️ Photo test</button>
+      </div>
+    </div>
+
+    <div class="group">
+      <h2>2 · Drawing style</h2>
+      <label class="row">Colours <output id="oColors">8</output></label>
+      <input type="range" id="rColors" min="3" max="14" step="1" value="8">
+      <label class="row">Marker thickness <output id="oMarker">10</output></label>
+      <input type="range" id="rMarker" min="6" max="18" step="1" value="10">
+      <label class="row">Fill pattern</label>
+      <select id="sFill">
+        <option value="marker" selected>Marker — back &amp; forth rows</option>
+        <option value="diagonal">Marker — diagonal</option>
+        <option value="cross">Cross-hatch (two passes)</option>
+      </select>
+      <label class="row">Outline style</label>
+      <select id="sOutline">
+        <option value="dark" selected>Each colour, darker shade</option>
+        <option value="same">Each colour, as-is</option>
+        <option value="black">Classic black outline</option>
+        <option value="none">No outline — fill only</option>
+      </select>
+      <label class="row" style="margin-top:10px"><span>White = paper (skip white areas)</span>
+        <input type="checkbox" id="cWhite" checked style="width:22px;height:22px;accent-color:var(--accent)">
+      </label>
+      <div class="palette" id="palette" title="Pens it will use"></div>
+      <h2 style="margin-top:14px">Photo simplifier — Paint by Order style</h2>
+      <label class="row"><span>Simplify real-life photos</span>
+        <input type="checkbox" id="cPhoto" checked style="width:22px;height:22px;accent-color:var(--accent)">
+      </label>
+      <label class="row">Detail (region size)</label>
+      <select id="sDetail">
+        <option value="relaxed">Relaxed — big chunky regions, fewest pens</option>
+        <option value="classic" selected>Classic — balanced, cartoony</option>
+        <option value="detailed">Detailed — smaller regions, more faithful</option>
+      </select>
+      <p class="hint">Same recipe as Paint by Order: smooth the photo, shrink it to a small palette, then flood-fill it into regions and absorb every tiny “confetti” region into its closest-colour neighbour until the picture passes the squint test — still recognisable, but flat and plottable.</p>
+      <canvas id="preview" width="400" height="400" style="width:100%;height:auto;border-radius:10px;border:1px solid var(--line);background:#fff"></canvas>
+      <p class="hint" id="regionInfo">Simplified preview will appear here.</p>
+    </div>
+
+    <div class="group">
+      <h2>3 · Playback &amp; video</h2>
+      <label class="row">Playback speed <output id="oSpeed">1×</output></label>
+      <input type="range" id="rSpeed" min="0.25" max="6" step="0.25" value="1">
+      <label class="row">Video format</label>
+      <select id="sFormat">
+        <option value="square" selected>Square 1:1 — YouTube / general</option>
+        <option value="portrait">Portrait 9:16 — TikTok / Reels / Shorts</option>
+      </select>
+      <label class="row">Recorded video length <output id="oVidLen">15s</output></label>
+      <input type="range" id="rVidLen" min="8" max="60" step="1" value="15">
+      <label class="row">Caption on portrait videos</label>
+      <input type="text" id="tCaption" value="watch it draw… 👀" maxlength="60">
+      <p class="hint" id="estTime">Estimated drawing time at 1×: —</p>
+    </div>
+  </aside>
+</main>
+
+<footer>
+  PlotterSim v1 — a pen-plotter simulator by Zachary Shade. How it works: your image is reduced to a small palette, every colour region is traced into outline paths, then each region is filled with overlapping back-and-forth marker strokes (slight transparency, so overlaps band darker — just like a real marker). The virtual plotter lifts its pen between strokes and drives to the pen dock to swap colours. No servers, no uploads, no tracking.
+</footer>
+
+<script>
+"use strict";
+/* ============================================================
+   PlotterSim — image -> outline strokes -> marker fill strokes
+   -> animated virtual pen plotter -> downloadable video.
+   ============================================================ */
+const $ = id => document.getElementById(id);
+const stage = $("stage"), sctx = stage.getContext("2d");
+
+/* ---------- deterministic rng (stable stroke wobble) ---------- */
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+
+/* ---------- state ---------- */
+let sourceCanvas = null;        // the input artwork (offscreen)
+let sourceName = "demo-star";
+let grid = null;                 // {W,H,labels:Int16Array,palette:[[r,g,b]..]}
+let strokes = [];                // {pts:[[x,y]..], color css, width, alpha, type, penId, len}
+let art = null, artCtx = null;   // accumulated finished drawing (grid coords * ART_SS)
+const ART_SS = 3;
+let layout = {W:1080,H:1080,paperX:110,paperY:110,paperS:1,gridW:0,gridH:0};
+let totalAt1x = 0;
+
+/* ---------- built-in demo artwork (flat cartoon shapes) ---------- */
+function makeSample(kind){
+  const c = document.createElement("canvas"); c.width = c.height = 720;
+  const x = c.getContext("2d");
+  x.fillStyle = "#ffffff"; x.fillRect(0,0,720,720);
+  x.lineJoin = "round"; x.lineCap = "round";
+  if(kind==="star"){
+    const cx=360, cy=350, R=230, r=95;
+    x.beginPath();
+    for(let i=0;i<10;i++){
+      const ang=-Math.PI/2 + i*Math.PI/5, rad=i%2===0?R:r;
+      const px=cx+Math.cos(ang)*rad, py=cy+Math.sin(ang)*rad;
+      i===0?x.moveTo(px,py):x.lineTo(px,py);
+    }
+    x.closePath(); x.fillStyle="#FFD93D"; x.fill();
+    x.beginPath(); x.arc(300,330,26,0,7); x.fillStyle="#26221a"; x.fill();
+    x.beginPath(); x.arc(420,330,26,0,7); x.fill();
+    x.beginPath(); x.arc(360,385,34,0.15*Math.PI,0.85*Math.PI); x.lineWidth=16; x.strokeStyle="#26221a"; x.stroke();
+    x.beginPath(); x.ellipse(255,395,36,22,0,0,7); x.fillStyle="#FF8FAB"; x.fill();
+    x.beginPath(); x.ellipse(465,395,36,22,0,0,7); x.fill();
+    x.beginPath(); x.arc(300,240,30,0,7); x.fillStyle="#FFF3B0"; x.fill();
+  } else if(kind==="berry"){
+    x.beginPath();
+    x.moveTo(360,190);
+    x.bezierCurveTo(520,190,590,320,560,470);
+    x.bezierCurveTo(535,600,440,680,360,685);
+    x.bezierCurveTo(280,680,185,600,160,470);
+    x.bezierCurveTo(130,320,200,190,360,190);
+    x.fillStyle="#EF476F"; x.fill();
+    x.fillStyle="#2FA84F";
+    for(let i=0;i<5;i++){
+      const ang=Math.PI*(0.08+0.21*i);
+      x.beginPath();
+      x.ellipse(360+Math.cos(ang)*-0, 185, 30, 95, (i-2)*0.45, 0, 7);
+      x.ellipse(360+Math.sin((i-2)*0.5)*105, 168-Math.abs(i-2)*8, 88, 30, (i-2)*0.42, 0, 7);
+      x.fill();
+    }
+    x.beginPath(); x.ellipse(360,150,26,52,0,0,7); x.fillStyle="#2FA84F"; x.fill();
+    x.fillStyle="#FFE29A";
+    const seeds=[[300,330],[420,330],[360,410],[275,450],[445,450],[330,540],[395,545],[360,300]];
+    for(const [sx,sy] of seeds){ x.beginPath(); x.ellipse(sx,sy,11,18,0,0,7); x.fill(); }
+    x.beginPath(); x.ellipse(255,330,26,44,-0.4,0,7); x.fillStyle="#FF8FA3"; x.fill();
+  } else if(kind==="landscape"){
+    // A photo-LIKE scene: continuous gradients, soft shadows, grain —
+    // exactly the kind of input the Paint by Order simplifier is for.
+    const sky=x.createLinearGradient(0,0,0,430);
+    sky.addColorStop(0,"#5ea9dd"); sky.addColorStop(.7,"#a8d4f0"); sky.addColorStop(1,"#dff2fd");
+    x.fillStyle=sky; x.fillRect(0,0,720,440);
+    const sun=x.createRadialGradient(565,120,10,565,120,120);
+    sun.addColorStop(0,"rgba(255,244,180,1)"); sun.addColorStop(.35,"rgba(255,224,102,.85)"); sun.addColorStop(1,"rgba(255,224,102,0)");
+    x.fillStyle=sun; x.fillRect(400,0,320,290);
+    x.save(); x.filter="blur(14px)"; x.fillStyle="rgba(255,255,255,.92)";
+    for(const [cx,cy,s] of [[170,130,1],[250,115,0.75],[470,180,0.8]]){
+      x.beginPath();
+      x.ellipse(cx,cy,95*s,34*s,0,0,7); x.ellipse(cx+52*s,cy+8*s,70*s,26*s,0,0,7);
+      x.ellipse(cx-58*s,cy+10*s,62*s,22*s,0,0,7); x.fill();
+    }
+    x.restore();
+    const mtn=x.createLinearGradient(0,220,0,470);
+    mtn.addColorStop(0,"#8e7cc3"); mtn.addColorStop(1,"#5b4b8a");
+    x.fillStyle=mtn;
+    x.beginPath(); x.moveTo(0,470); x.lineTo(150,250); x.lineTo(300,430); x.lineTo(430,265); x.lineTo(720,470); x.closePath(); x.fill();
+    x.fillStyle="rgba(255,255,255,.85)";
+    x.beginPath(); x.moveTo(150,250); x.lineTo(185,300); x.lineTo(150,325); x.lineTo(118,298); x.closePath(); x.fill();
+    x.beginPath(); x.moveTo(430,265); x.lineTo(462,312); x.lineTo(430,332); x.lineTo(402,308); x.closePath(); x.fill();
+    const grs=x.createLinearGradient(0,430,0,720);
+    grs.addColorStop(0,"#7bc96f"); grs.addColorStop(1,"#2f8f3e");
+    x.fillStyle=grs; x.fillRect(0,430,720,290);
+    // little house with shaded sides
+    x.fillStyle="#c96f2e"; x.fillRect(110,470,170,130);
+    x.fillStyle="#a8541f"; x.fillRect(230,470,50,130);
+    x.fillStyle="#7a3b12"; x.beginPath(); x.moveTo(85,478); x.lineTo(195,395); x.lineTo(305,478); x.closePath(); x.fill();
+    x.fillStyle="#ffe29a"; x.fillRect(140,515,44,44);
+    x.fillStyle="#5b3413"; x.fillRect(215,520,36,80);
+    // tree
+    x.fillStyle="#6b4423"; x.fillRect(520,500,22,105);
+    const tg=x.createRadialGradient(505,440,10,530,455,95);
+    tg.addColorStop(0,"#57a773"); tg.addColorStop(1,"#1e6b34");
+    x.fillStyle=tg; x.beginPath(); x.arc(530,450,88,0,7); x.fill();
+    // photographic grain
+    const gr=mulberry32(42);
+    for(let i=0;i<9000;i++){
+      x.fillStyle=`rgba(${gr()>0.5?255:0},${gr()>0.5?255:0},${gr()>0.5?255:0},0.05)`;
+      x.fillRect(gr()*720, gr()*720, 2.2, 2.2);
+    }
+  } else { // rocket
+    x.beginPath(); // flame outer
+    x.moveTo(360,560); x.bezierCurveTo(300,470,315,420,360,380);
+    x.bezierCurveTo(405,420,420,470,360,560); x.fillStyle="#FF7B00"; x.fill();
+    x.beginPath();
+    x.moveTo(360,520); x.bezierCurveTo(330,465,338,430,360,405);
+    x.bezierCurveTo(382,430,390,465,360,520); x.fillStyle="#FFD93D"; x.fill();
+    x.beginPath(); // fins
+    x.moveTo(285,360); x.bezierCurveTo(210,430,190,510,185,545); x.lineTo(290,505); x.closePath();
+    x.fillStyle="#EF476F"; x.fill();
+    x.beginPath();
+    x.moveTo(435,360); x.bezierCurveTo(510,430,530,510,535,545); x.lineTo(430,505); x.closePath(); x.fill();
+    x.beginPath(); // body
+    x.moveTo(360,60);
+    x.bezierCurveTo(445,150,460,300,445,505); x.lineTo(275,505);
+    x.bezierCurveTo(260,300,275,150,360,60); x.fillStyle="#E9ECEF"; x.fill();
+    x.beginPath(); // nose
+    x.moveTo(360,60); x.bezierCurveTo(395,100,420,150,432,215); x.lineTo(288,215);
+    x.bezierCurveTo(300,150,325,100,360,60); x.fillStyle="#EF476F"; x.fill();
+    x.beginPath(); x.arc(360,320,62,0,7); x.fillStyle="#4CC9F0"; x.fill();
+    x.beginPath(); x.arc(360,320,62,0,7); x.lineWidth=14; x.strokeStyle="#8d99ae"; x.stroke();
+    x.beginPath(); x.arc(338,298,16,0,7); x.fillStyle="#CAF0F8"; x.fill();
+    x.fillStyle="#FFD93D";
+    x.beginPath(); x.arc(150,150,13,0,7); x.fill();
+    x.beginPath(); x.arc(585,210,10,0,7); x.fill();
+    x.beginPath(); x.arc(540,110,8,0,7); x.fill();
+  }
+  return c;
+}
+
+/* ============================================================
+   IMAGE -> GRID  (quantize + Paint-by-Order style simplify)
+   ============================================================ */
+function medianCutPalette(pixels, nColors){
+  // pixels: flat array of [r,g,b]
+  let boxes = [{px: pixels}];
+  const avg = px => {
+    let r=0,g=0,b=0; for(const p of px){r+=p[0];g+=p[1];b+=p[2];}
+    const n=Math.max(1,px.length); return [Math.round(r/n),Math.round(g/n),Math.round(b/n)];
+  };
+  while(boxes.length < nColors){
+    // pick splittable box with biggest channel range
+    let bi=-1, bRange=-1, bChan=0;
+    boxes.forEach((box,i)=>{
+      if(box.px.length<2) return;
+      let mn=[255,255,255], mx=[0,0,0];
+      for(const p of box.px) for(let c=0;c<3;c++){ if(p[c]<mn[c])mn[c]=p[c]; if(p[c]>mx[c])mx[c]=p[c]; }
+      let range=0, chan=0;
+      for(let c=0;c<3;c++){ const d=mx[c]-mn[c]; if(d>range){range=d;chan=c;} }
+      if(range>bRange){bRange=range;bi=i;bChan=chan;}
+    });
+    if(bi<0 || bRange<8) break;
+    const box = boxes.splice(bi,1)[0];
+    box.px.sort((a,b)=>a[bChan]-b[bChan]);
+    const mid = box.px.length>>1;
+    boxes.push({px:box.px.slice(0,mid)}, {px:box.px.slice(mid)});
+  }
+  return boxes.map(b=>avg(b.px));
+}
+
+function labelComponents(labels, W, H){
+  // 4-connectivity connected components of equal label (label -1 = bg, skipped)
+  const comp = new Int32Array(W*H).fill(-1);
+  const comps = []; // {label,size,pixels:[idx..], neighbours:Map compId->borderLen}
+  const stack = [];
+  for(let i=0;i<W*H;i++){
+    if(labels[i]<0 || comp[i]>=0) continue;
+    const id = comps.length, lab = labels[i];
+    let size=0; const pix=[];
+    stack.length=0; stack.push(i); comp[i]=id;
+    while(stack.length){
+      const cur = stack.pop(); size++; pix.push(cur);
+      const cx=cur%W, cy=(cur/W)|0;
+      if(cx>0)   { const n=cur-1; if(comp[n]<0 && labels[n]===lab){comp[n]=id;stack.push(n);} }
+      if(cx<W-1) { const n=cur+1; if(comp[n]<0 && labels[n]===lab){comp[n]=id;stack.push(n);} }
+      if(cy>0)   { const n=cur-W; if(comp[n]<0 && labels[n]===lab){comp[n]=id;stack.push(n);} }
+      if(cy<H-1) { const n=cur+W; if(comp[n]<0 && labels[n]===lab){comp[n]=id;stack.push(n);} }
+    }
+    comps.push({label:lab,size,pixels:pix,neighbours:new Map()});
+  }
+  // border lengths between components
+  for(let y=0;y<H;y++) for(let x=0;x<W;x++){
+    const i=y*W+x, ci=comp[i]; if(ci<0) continue;
+    if(x<W-1){ const cj=comp[i+1]; if(cj>=0 && cj!==ci){
+      comps[ci].neighbours.set(cj,(comps[ci].neighbours.get(cj)||0)+1);
+      comps[cj].neighbours.set(ci,(comps[cj].neighbours.get(ci)||0)+1);
+    }}
+    if(y<H-1){ const cj=comp[i+W]; if(cj>=0 && cj!==ci){
+      comps[ci].neighbours.set(cj,(comps[ci].neighbours.get(cj)||0)+1);
+      comps[cj].neighbours.set(ci,(comps[cj].neighbours.get(ci)||0)+1);
+    }}
+  }
+  return {comp, comps};
+}
+
+function mergeSmallRegions(labels, W, H, palette, minFrac){
+  // Paint by Order "no confetti" rule: absorb any region smaller than
+  // minFrac of the image into the neighbouring region whose palette
+  // colour is closest (ties: longest shared border). Repeat.
+  const total = W*H, minSize = Math.max(6, Math.round(total*minFrac));
+  let regionsBefore = 0, regionsAfter = 0;
+  for(let round=0; round<10; round++){
+    const {comp, comps} = labelComponents(labels, W, H);
+    regionsAfter = comps.length; if(round===0) regionsBefore = comps.length;
+    const small = comps.map((c,id)=>({c,id})).filter(o=>o.c.size<minSize && o.c.neighbours.size>0);
+    if(!small.length) break;
+    // plan merges from this snapshot, then apply
+    const remap = new Map(); // compId -> new label
+    for(const {c,id} of small){
+      let best=-1, bestScore=Infinity;
+      for(const [nid, border] of c.neighbours){
+        const nl = comps[nid].label; if(nl===c.label) continue;
+        const a=palette[c.label], b=palette[nl]; if(!a||!b) continue;
+        const d = (a[0]-b[0])**2 + (a[1]-b[1])**2 + (a[2]-b[2])**2 - border*40;
+        if(d<bestScore){bestScore=d;best=nl;}
+      }
+      if(best>=0) remap.set(id,best);
+    }
+    if(!remap.size) break;
+    let changed=0;
+    for(const {c,id} of small){
+      if(!remap.has(id)) continue;
+      const nl = remap.get(id);
+      for(const p of c.pixels){ labels[p]=nl; } changed++;
+    }
+    if(!changed) break;
+    regionsAfter = -1; // stale, recomputed below
+  }
+  const finalCount = labelComponents(labels, W, H).comps.length;
+  return {regionsBefore, regionsAfter: finalCount, minSize};
+}
+
+function majorityFilter(labels, W, H, passes){
+  const src = new Int16Array(labels);
+  const dst = new Int16Array(labels);
+  for(let pass=0; pass<passes; pass++){
+    src.set(dst);
+    for(let y=1;y<H-1;y++) for(let x=1;x<W-1;x++){
+      const i=y*W+x; if(src[i]<0) continue;
+      const counts = new Map();
+      for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++){
+        const v=src[i+dy*W+dx]; if(v>=0) counts.set(v,(counts.get(v)||0)+1);
+      }
+      let best=src[i], bn=0;
+      for(const [v,n] of counts) if(n>bn){bn=n;best=v;}
+      if(bn>=5) dst[i]=best;
+    }
+  }
+  labels.set(dst);
+}
+
+function analyze(){
+  if(!sourceCanvas) return;
+  const photoMode = $("cPhoto").checked;
+  const detail = $("sDetail").value;
+  const maxDim = photoMode ? 440 : 380;
+  const sw = sourceCanvas.width, sh = sourceCanvas.height;
+  const scale = Math.min(1, maxDim/Math.max(sw,sh));
+  const W = Math.max(8, Math.round(sw*scale)), H = Math.max(8, Math.round(sh*scale));
+
+  const work = document.createElement("canvas"); work.width=W; work.height=H;
+  const wx = work.getContext("2d", {willReadFrequently:true});
+  wx.imageSmoothingEnabled = true; wx.imageSmoothingQuality = "high";
+  if(photoMode){
+    // extra smoothing pass: shrink to half and back up = cheap photo blur,
+    // kills sensor noise/JPEG speckle before quantization
+    const half = document.createElement("canvas");
+    half.width=Math.max(4,W>>1); half.height=Math.max(4,H>>1);
+    const hx = half.getContext("2d");
+    hx.drawImage(sourceCanvas,0,0,half.width,half.height);
+    wx.drawImage(half,0,0,W,H);
+    wx.drawImage(half,0,0,W,H); // second pass deepens the smoothing slightly
+  } else {
+    wx.drawImage(sourceCanvas,0,0,W,H);
+  }
+  const img = wx.getImageData(0,0,W,H), data = img.data;
+  const whitePaper = $("cWhite").checked;
+  const isWhiteRaw = p => data[p*4]>242 && data[p*4+1]>242 && data[p*4+2]>242 && data[p*4+3]>=140;
+  // White counts as paper ONLY where it is connected to the image border
+  // (a photo's interior whites — clouds, snow, highlights — stay colours
+  // and get drawn, like in Paint by Order; a cartoon's white page goes away).
+  const borderWhite = new Uint8Array(W*H);
+  if(whitePaper){
+    const stack=[];
+    const seed=(x,y)=>{ const p=y*W+x; if(isWhiteRaw(p) && !borderWhite[p]){ borderWhite[p]=1; stack.push(p); } };
+    for(let x=0;x<W;x++){ seed(x,0); seed(x,H-1); }
+    for(let y=0;y<H;y++){ seed(0,y); seed(W-1,y); }
+    while(stack.length){
+      const cur=stack.pop(), cx=cur%W, cy=(cur/W)|0;
+      if(cx>0) seed(cx-1,cy); if(cx<W-1) seed(cx+1,cy);
+      if(cy>0) seed(cx,cy-1); if(cy<H-1) seed(cx,cy+1);
+    }
+  }
+  const isBg = i => {
+    const p=i/4;
+    if(data[i+3] < 140) return true;
+    if(whitePaper && borderWhite[p]) return true;
+    return false;
+  };
+  // sample pixels for the palette
+  const samples = [];
+  for(let p=0;p<W*H;p++){
+    const i=p*4; if(isBg(i)) continue;
+    if(samples.length<90000 || p%3===0) samples.push([data[i],data[i+1],data[i+2]]);
+  }
+  let nColors = parseInt($("rColors").value,10);
+  if(photoMode && detail==="relaxed") nColors = Math.min(nColors, 10);
+  const palette = medianCutPalette(samples, nColors);
+
+  // assign nearest palette colour
+  const labels = new Int16Array(W*H).fill(-1);
+  for(let p=0;p<W*H;p++){
+    const i=p*4; if(isBg(i)) continue;
+    let best=0, bd=Infinity;
+    for(let c=0;c<palette.length;c++){
+      const d=(data[i]-palette[c][0])**2 + (data[i+1]-palette[c][1])**2 + (data[i+2]-palette[c][2])**2;
+      if(d<bd){bd=d;best=c;}
+    }
+    labels[p]=best;
+  }
+
+  // ---- Paint by Order simplification: smooth labels, merge confetti ----
+  let mergeStats = null;
+  if(photoMode){
+    majorityFilter(labels, W, H, detail==="detailed" ? 1 : 2);
+    const minFrac = detail==="relaxed" ? 0.0045 : detail==="detailed" ? 0.00045 : 0.0013;
+    mergeStats = mergeSmallRegions(labels, W, H, palette, minFrac);
+  } else {
+    // clean line-art mode: just sweep stray JPEG specks
+    mergeStats = mergeSmallRegions(labels, W, H, palette, 0.0002);
+  }
+
+  grid = {W,H,labels,palette};
+  renderPreview();
+  const ri = $("regionInfo");
+  if(mergeStats){
+    ri.textContent = photoMode
+      ? `Simplified: ${palette.length} pens · ${mergeStats.regionsAfter} regions (was ${mergeStats.regionsBefore} before the no-confetti merge).`
+      : `Cleaned up: ${palette.length} pens · ${mergeStats.regionsAfter} regions.`;
+  }
+  buildStrokes();
+}
+
+function renderPreview(){
+  if(!grid) return;
+  const {W,H,labels,palette} = grid;
+  const pv = $("preview"); pv.width=W; pv.height=H;
+  const px = pv.getContext("2d");
+  const img = px.createImageData(W,H);
+  for(let p=0;p<W*H;p++){
+    const i=p*4, lab=labels[p];
+    if(lab<0){ img.data[i]=253; img.data[i+1]=252; img.data[i+2]=248; img.data[i+3]=255; }
+    else { img.data[i]=palette[lab][0]; img.data[i+1]=palette[lab][1]; img.data[i+2]=palette[lab][2]; img.data[i+3]=255; }
+  }
+  px.putImageData(img,0,0);
+}
+
+/* ============================================================
+   STROKE BUILDING — outlines (marching squares) then fills
+   ============================================================ */
+const rgbCss = (c,a=1)=>`rgba(${c[0]},${c[1]},${c[2]},${a})`;
+const darken = (c,f)=>[Math.round(c[0]*f),Math.round(c[1]*f),Math.round(c[2]*f)];
+const luminance = c => 0.2126*c[0]+0.7152*c[1]+0.0722*c[2];
+function strokeLen(pts){
+  let L=0; for(let i=1;i<pts.length;i++) L+=Math.hypot(pts[i][0]-pts[i-1][0], pts[i][1]-pts[i-1][1]);
+  return L;
+}
+
+function traceOutlines(mask, W, H){
+  // Marching squares on the binary mask; segment endpoints live on a
+  // doubled integer lattice so chaining is exact.
+  const at = (x,y)=> (x>=0 && x<W && y>=0 && y<H) ? mask[y*W+x] : 0;
+  const EDGES = { // per cell, corners a=TL b=TR c=BR d=BL -> segment pairs
+    1:[["L","B"]], 2:[["B","R"]], 3:[["L","R"]], 4:[["T","R"]],
+    5:[["T","R"],["L","B"]], 6:[["T","B"]], 7:[["T","L"]], 8:[["T","L"]],
+    9:[["T","B"]], 10:[["T","L"],["B","R"]], 11:[["T","R"]], 12:[["L","R"]],
+    13:[["B","R"]], 14:[["L","B"]]
+  };
+  const pt = (e,x,y)=>{
+    switch(e){
+      case "T": return [2*x+1, 2*y];
+      case "R": return [2*x+2, 2*y+1];
+      case "B": return [2*x+1, 2*y+2];
+      default:  return [2*x,   2*y+1]; // L
+    }
+  };
+  const segs = []; // [x1,y1,x2,y2] doubled coords
+  const byPoint = new Map();
+  const key = (x,y)=>x+","+y;
+  for(let y=0;y<H-1;y++) for(let x=0;x<W-1;x++){
+    const idx = (at(x,y)<<3)|(at(x+1,y)<<2)|(at(x+1,y+1)<<1)|at(x,y+1);
+    const table = EDGES[idx]; if(!table) continue;
+    for(const [e1,e2] of table){
+      const A=pt(e1,x,y), B=pt(e2,x,y);
+      const si = segs.length;
+      segs.push([A[0],A[1],B[0],B[1]]);
+      for(const P of [A,B]){
+        const k=key(P[0],P[1]);
+        if(!byPoint.has(k)) byPoint.set(k,[]);
+        byPoint.get(k).push(si);
+      }
+    }
+  }
+  const used = new Uint8Array(segs.length);
+  const lines = [];
+  for(let s=0;s<segs.length;s++){
+    if(used[s]) continue;
+    used[s]=1;
+    let chain = [[segs[s][0],segs[s][1]],[segs[s][2],segs[s][3]]];
+    // grow from the head
+    for(;;){
+      const head = chain[chain.length-1];
+      const cand = byPoint.get(key(head[0],head[1]))||[];
+      let nxt=-1;
+      for(const ci of cand){ if(!used[ci]){ nxt=ci; break; } }
+      if(nxt<0) break;
+      used[nxt]=1;
+      const g=segs[nxt];
+      const other = (g[0]===head[0]&&g[1]===head[1]) ? [g[2],g[3]] : [g[0],g[1]];
+      chain.push(other);
+      if(other[0]===chain[0][0] && other[1]===chain[0][1]) break; // closed
+    }
+    // convert to float grid coords + light decimation
+    const pts=[]; let last=null;
+    for(const [dx,dy] of chain){
+      const p=[dx/2, dy/2];
+      if(!last || Math.hypot(p[0]-last[0],p[1]-last[1])>=0.9){ pts.push(p); last=p; }
+    }
+    if(pts.length>=2 && strokeLen(pts)>=5) lines.push(pts);
+  }
+  return lines;
+}
+
+function fillStrokesForMask(mask, W, H, markerW, angleDeg, rng){
+  // Generic scan fill: walk lines at angleDeg across the mask, group
+  // contiguous in-mask samples into runs. Back-and-forth ordering.
+  const ang = angleDeg*Math.PI/180;
+  const d=[Math.cos(ang),Math.sin(ang)], n=[-d[1],d[0]];
+  const cx=W/2, cy=H/2, R=Math.hypot(W,H)/2;
+  const spacing = markerW*0.78;
+  const out = [];
+  let row=0;
+  for(let off=-R; off<=R; off+=spacing, row++){
+    const runs=[]; let cur=null;
+    for(let s=-R; s<=R; s+=1.4){
+      const px = cx + d[0]*s + n[0]*off, py = cy + d[1]*s + n[1]*off;
+      const ix=Math.round(px), iy=Math.round(py);
+      const inside = ix>=0 && ix<W && iy>=0 && iy<H && mask[iy*W+ix];
+      if(inside){ if(!cur) cur={a:s,b:s}; else cur.b=s; }
+      else if(cur){ runs.push(cur); cur=null; }
+    }
+    if(cur) runs.push(cur);
+    const flip = row%2===1;
+    if(flip) runs.reverse();
+    for(const run of runs){
+      if(run.b-run.a < markerW*0.55) continue; // too short to bother lifting the pen for
+      const a = flip ? run.b : run.a, b = flip ? run.a : run.b;
+      const pts=[];
+      const total = b-a, stepLen=26;
+      const nSeg = Math.max(1, Math.round(total/stepLen));
+      for(let k=0;k<=nSeg;k++){
+        const s=a+(b-a)*(k/nSeg);
+        // slight hand-drawn wobble, deterministic per stroke
+        const wob = k===0||k===nSeg ? 0 : (rng()-0.5)*1.1;
+        pts.push([cx + d[0]*s + n[0]*(off+wob), cy + d[1]*s + n[1]*(off+wob)]);
+      }
+      out.push(pts);
+    }
+  }
+  return out;
+}
+
+function buildStrokes(){
+  if(!grid) return;
+  const {W,H,labels,palette} = grid;
+  const markerW = parseFloat($("rMarker").value);
+  const fillStyle = $("sFill").value;
+  const outlineStyle = $("sOutline").value;
+  const rng = mulberry32(1234567);
+
+  const masks = palette.map((_,ci)=>{
+    const m = new Uint8Array(W*H);
+    for(let p=0;p<W*H;p++) if(labels[p]===ci) m[p]=1;
+    return m;
+  });
+  const counts = masks.map(m=>m.reduce((a,b)=>a+b,0));
+  const orderLightFirst = palette.map((c,i)=>i).filter(i=>counts[i]>0)
+    .sort((a,b)=>luminance(palette[b])-luminance(palette[a]));
+
+  const list = [];
+  // ---- Phase 1: outlines for every colour ----
+  if(outlineStyle!=="none"){
+    const ow = Math.max(2.0, markerW*0.26);
+    for(const ci of orderLightFirst){
+      let col = outlineStyle==="black" ? [30,28,26]
+              : outlineStyle==="same" ? palette[ci]
+              : darken(palette[ci], 0.52);
+      if(outlineStyle==="dark" && luminance(palette[ci])<40) col = palette[ci];
+      const lines = traceOutlines(masks[ci], W, H);
+      for(const pts of lines){
+        list.push({pts, color:rgbCss(col), penColor:col, width:ow, alpha:1,
+          type:"outline", penId:"o"+col.join("-"), len:strokeLen(pts), ci});
+      }
+    }
+  }
+  // ---- Phase 2: marker fills, light colours first ----
+  for(const ci of orderLightFirst){
+    const angles = fillStyle==="diagonal" ? [38] : fillStyle==="cross" ? [0,90] : [0];
+    angles.forEach((ang,pass)=>{
+      const ptsList = fillStrokesForMask(masks[ci], W, H, markerW, ang, rng);
+      for(const pts of ptsList){
+        list.push({pts, color:rgbCss(palette[ci]), penColor:palette[ci], width:markerW,
+          alpha: pass===0 ? 0.86 : 0.5, type:"fill",
+          penId:"f"+ci+(pass?"x":""), len:strokeLen(pts), ci});
+      }
+    });
+  }
+  strokes = list;
+
+  // pen palette display
+  const pal = $("palette"); pal.innerHTML="";
+  const pensSeen = new Map();
+  for(const s of strokes) if(!pensSeen.has(s.penId)) pensSeen.set(s.penId, s.penColor);
+  for(const [,c] of pensSeen){
+    const d=document.createElement("div"); d.className="sw"; d.style.background=rgbCss(c); pal.appendChild(d);
+  }
+
+  // fresh artwork canvas
+  art = document.createElement("canvas"); art.width=W*ART_SS; art.height=H*ART_SS;
+  artCtx = art.getContext("2d");
+  artCtx.fillStyle="#fdfcf8"; artCtx.fillRect(0,0,art.width,art.height);
+  artCtx.lineJoin="round"; artCtx.lineCap="round";
+
+  computeLayout();
+  totalAt1x = estimateDuration();
+  $("estTime").textContent = `Estimated drawing time at 1×: ~${Math.round(totalAt1x)}s · ${strokes.length} pen strokes · ${pensSeen.size} pens`;
+  resetPlayer();
+  setStatus(`Ready — <b>${strokes.length} strokes</b>. Outlines first, then marker fill. Press Play.`);
+}
+
+function estimateDuration(){
+  // dry-run of the player timing at 1x
+  let t=0, prevPen=null, pos=[grid.W/2,-24];
+  const DOCK=[grid.W/2,-24];
+  for(const s of strokes){
+    if(s.penId!==prevPen){ t+=0.8; pos=DOCK; prevPen=s.penId; }
+    const a=s.pts[0];
+    t += Math.hypot(a[0]-pos[0],a[1]-pos[1])/2600 + 0.06;
+    t += s.len/1250 + 0.06;
+    pos=s.pts[s.pts.length-1];
+  }
+  return t;
+}
+
+/* ============================================================
+   PLAYER — a little state machine: swap pen -> travel -> down
+   -> draw -> up -> next stroke…
+   ============================================================ */
+const DOCK = ()=>[grid.W/2, -26];
+let player = null;
+let speedMul = 1;
+let recOverrideSpeed = null;
+
+function resetPlayer(){
+  if(artCtx && grid){
+    artCtx.setTransform(1,0,0,1,0,0);
+    artCtx.fillStyle="#fdfcf8"; artCtx.fillRect(0,0,art.width,art.height);
+  }
+  player = { idx:0, mode:null, t:0, dur:0, from:DOCK(), to:DOCK(),
+             pos:DOCK(), lift:1, curPen:null, playing:false, done:false,
+             statusKey:"" };
+  updatePlayBtn(); updateBar();
+}
+function drawStrokeToArt(s, pts){
+  if(!pts || pts.length<2) return;
+  artCtx.setTransform(ART_SS,0,0,ART_SS,0,0);
+  artCtx.globalAlpha = s.alpha;
+  artCtx.strokeStyle = s.color;
+  artCtx.lineWidth = s.width;
+  artCtx.beginPath();
+  artCtx.moveTo(pts[0][0], pts[0][1]);
+  for(let i=1;i<pts.length;i++) artCtx.lineTo(pts[i][0], pts[i][1]);
+  artCtx.stroke();
+  artCtx.globalAlpha = 1;
+}
+function partialPts(pts, dist){
+  const out=[pts[0]]; let acc=0;
+  for(let i=1;i<pts.length;i++){
+    const seg=Math.hypot(pts[i][0]-pts[i-1][0], pts[i][1]-pts[i-1][1]);
+    if(acc+seg<=dist){ out.push(pts[i]); acc+=seg; }
+    else{
+      const f=seg===0?0:(dist-acc)/seg;
+      out.push([pts[i-1][0]+(pts[i][0]-pts[i-1][0])*f, pts[i-1][1]+(pts[i][1]-pts[i-1][1])*f]);
+      return {pts:out, end:out[out.length-1]};
+    }
+  }
+  return {pts:out, end:pts[pts.length-1]};
+}
+function setPhase(mode, to, dur){
+  player.mode=mode; player.t=0; player.dur=Math.max(0.012, dur);
+  player.from=[...player.pos]; player.to=[...to];
+}
+function beginStrokeSetup(){
+  const s = strokes[player.idx];
+  if(!s){ finishPlayback(); return; }
+  if(s.penId !== player.curPen){
+    const dk = DOCK();
+    const distDock = Math.hypot(dk[0]-player.pos[0], dk[1]-player.pos[1]);
+    if(distDock>1){ setPhase("swapTravel", dk, distDock/2600); }
+    else setPhase("swapWait", dk, 0.55);
+  } else {
+    const a=s.pts[0];
+    setPhase("travel", a, Math.hypot(a[0]-player.pos[0], a[1]-player.pos[1])/2600);
+  }
+}
+function completePhase(){
+  const s = strokes[player.idx];
+  switch(player.mode){
+    case "swapTravel": setPhase("swapWait", DOCK(), 0.55); break;
+    case "swapWait":
+      player.curPen = s.penId;
+      setPhase("travel", s.pts[0], Math.hypot(s.pts[0][0]-player.pos[0], s.pts[0][1]-player.pos[1])/2600);
+      break;
+    case "travel": setPhase("down", s.pts[0], 0.07); break;
+    case "down": setPhase("draw", s.pts[s.pts.length-1], s.len/1250); break;
+    case "draw":
+      drawStrokeToArt(s, s.pts);
+      setPhase("up", player.pos, 0.06);
+      break;
+    case "up":
+      player.idx++; player.mode=null;
+      if(player.idx>=strokes.length) finishPlayback();
+      break;
+  }
+}
+function finishPlayback(){
+  player.done=true; player.playing=false; player.mode=null;
+  player.pos = DOCK(); player.lift=1;
+  updatePlayBtn(); updateBar();
+  setStatus(`Done! <b>${strokes.length} strokes</b> — download the PNG or record it again as a video.`);
+  if(recording) stopRecordingSoon();
+}
+function tick(simDt){
+  if(!player || player.done) return;
+  let dt = simDt;
+  let guard=0;
+  while(dt>0 && !player.done && guard++<40){
+    if(player.mode===null){ beginStrokeSetup(); if(player.done||player.mode===null) break; }
+    const remain = player.dur - player.t;
+    if(dt < remain){
+      player.t += dt; dt = 0;
+    } else {
+      player.t = player.dur; dt -= remain;
+      applyPhasePose(1);
+      completePhase();
+    }
+  }
+  if(player.mode) applyPhasePose(player.dur? player.t/player.dur : 1);
+  updateBar(); updateStatus();
+}
+function applyPhasePose(f){
+  const ease = f<.5 ? 2*f*f : 1-Math.pow(-2*f+2,2)/2;
+  const s = strokes[player.idx];
+  switch(player.mode){
+    case "swapTravel": case "travel":
+      player.pos = [ player.from[0]+(player.to[0]-player.from[0])*ease,
+                     player.from[1]+(player.to[1]-player.from[1])*ease ];
+      player.lift = 1; break;
+    case "swapWait": player.lift = 1; break;
+    case "down": player.lift = 1-f; break;
+    case "up": player.lift = f; break;
+    case "draw": {
+      if(!s) break;
+      const part = partialPts(s.pts, s.len*f);
+      player.pos = part.end; player.partial = part.pts; player.lift = 0;
+      break;
+    }
+  }
+  if(player.mode!=="draw") player.partial=null;
+}
+function updateBar(){
+  if(!player || !strokes.length) return;
+  $("bar").style.width = (player.done?100:(player.idx/strokes.length)*100).toFixed(1)+"%";
+}
+function updateStatus(){
+  if(!player || player.done) return;
+  const s = strokes[player.idx]; if(!s) return;
+  const key = s.type + s.penId + (player.mode==="swapWait"?"swap":"");
+  if(key===player.statusKey) return; player.statusKey=key;
+  const penNo = 1 + new Set(strokes.slice(0,player.idx+1).map(x=>x.penId)).size - 1;
+  if(player.mode==="swapWait") setStatus(`🧺 Swapping pens at the dock…`);
+  else if(s.type==="outline") setStatus(`✒️ <b>Outlining</b> — stroke ${player.idx+1} of ${strokes.length}`);
+  else setStatus(`🖍️ <b>Filling</b> — stroke ${player.idx+1} of ${strokes.length}`);
+}
+function setStatus(html){ $("status").innerHTML = html; }
+function updatePlayBtn(){ $("btnPlay").textContent = player && player.playing ? "⏸ Pause" : "▶ Play"; }
+
+/* ============================================================
+   SCENE — desk, paper, plotter gantry, carriage, pen, dock
+   ============================================================ */
+function computeLayout(){
+  const fmt = $("sFormat").value;
+  if(fmt==="portrait"){ stage.width=1080; stage.height=1920; }
+  else { stage.width=1080; stage.height=1080; }
+  const W=stage.width, H=stage.height;
+  const topReserve = fmt==="portrait" ? 210 : 150;
+  const bottomReserve = fmt==="portrait" ? 300 : 140;
+  const sideReserve = 130;
+  const s = Math.min((W-sideReserve*2)/grid.W, (H-topReserve-bottomReserve)/grid.H);
+  layout = { W,H, s, gridW:grid.W, gridH:grid.H,
+    paperW: grid.W*s, paperH: grid.H*s,
+    paperX: (W-grid.W*s)/2, paperY: topReserve + (H-topReserve-bottomReserve-grid.H*s)/2 };
+}
+const g2c = (x,y)=>[layout.paperX + x*layout.s, layout.paperY + y*layout.s];
+function rr(x,y,w,h,r){
+  sctx.beginPath();
+  sctx.moveTo(x+r,y); sctx.arcTo(x+w,y,x+w,y+h,r); sctx.arcTo(x+w,y+h,x,y+h,r);
+  sctx.arcTo(x,y+h,x,y,r); sctx.arcTo(x,y,x+w,y,r); sctx.closePath();
+}
+function drawScene(){
+  if(!grid || !player) return;
+  const {W,H} = layout;
+  // desk
+  const g = sctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,"#232839"); g.addColorStop(1,"#12151f");
+  sctx.fillStyle=g; sctx.fillRect(0,0,W,H);
+  // paper shadow + paper
+  sctx.save();
+  sctx.shadowColor="rgba(0,0,0,.55)"; sctx.shadowBlur=34; sctx.shadowOffsetY=12;
+  sctx.fillStyle="#fdfcf8";
+  rr(layout.paperX, layout.paperY, layout.paperW, layout.paperH, 10); sctx.fill();
+  sctx.restore();
+  if(art) sctx.drawImage(art, layout.paperX, layout.paperY, layout.paperW, layout.paperH);
+
+  const [penX, penY] = g2c(player.pos[0], player.pos[1]);
+
+  // partial stroke in progress
+  if(player.partial && player.partial.length>1){
+    const s = strokes[player.idx];
+    sctx.save();
+    sctx.lineJoin="round"; sctx.lineCap="round";
+    sctx.globalAlpha=s.alpha; sctx.strokeStyle=s.color; sctx.lineWidth=s.width*layout.s;
+    sctx.beginPath();
+    const p0=g2c(player.partial[0][0], player.partial[0][1]); sctx.moveTo(p0[0],p0[1]);
+    for(let i=1;i<player.partial.length;i++){ const p=g2c(player.partial[i][0],player.partial[i][1]); sctx.lineTo(p[0],p[1]); }
+    sctx.stroke(); sctx.restore();
+  }
+
+  // side rails
+  const railTop = layout.paperY-92, railBot = layout.paperY+layout.paperH+92;
+  for(const rx of [layout.paperX-72, layout.paperX+layout.paperW+48]){
+    const rg = sctx.createLinearGradient(rx,0,rx+24,0);
+    rg.addColorStop(0,"#5a6378"); rg.addColorStop(.5,"#aeb8cc"); rg.addColorStop(1,"#4a5268");
+    sctx.fillStyle=rg; rr(rx, railTop, 24, railBot-railTop, 12); sctx.fill();
+    sctx.fillStyle="#2c3142";
+    for(const by of [railTop+18, railBot-18]){ sctx.beginPath(); sctx.arc(rx+12,by,5,0,7); sctx.fill(); }
+  }
+  // pen dock tray (top centre, above the paper)
+  const [dockX, dockY] = g2c(...DOCK());
+  sctx.fillStyle="#39415a"; rr(dockX-120, dockY-24, 240, 40, 10); sctx.fill();
+  const dockPens = [...new Map(strokes.map(s=>[s.penId, s.penColor])).values()];
+  dockPens.forEach((c,i)=>{
+    const px = dockX - 108 + i*(216/Math.max(1,dockPens.length-1||1)) || dockX;
+    sctx.fillStyle = rgbCss(c); rr(dockX-108 + (dockPens.length>1 ? i*(196/(dockPens.length-1)) : 98), dockY-17, 20, 26, 5); sctx.fill();
+  });
+  sctx.fillStyle="#c8d2e8"; sctx.font="600 19px system-ui"; sctx.textAlign="center";
+  sctx.fillText("PEN DOCK", dockX, dockY+38);
+
+  // gantry bar rides ~78px above the pen point; the carriage hangs on it
+  // and the pen sticks out underneath, so the tip is never covered.
+  const gy = Math.max(railTop, Math.min(railBot-32, penY-78));
+  sctx.save();
+  sctx.shadowColor="rgba(0,0,0,.4)"; sctx.shadowBlur=14; sctx.shadowOffsetY=5;
+  const gg = sctx.createLinearGradient(0,gy,0,gy+32);
+  gg.addColorStop(0,"#c3cbdd"); gg.addColorStop(.5,"#8d99b5"); gg.addColorStop(1,"#5f6a86");
+  sctx.fillStyle=gg;
+  rr(layout.paperX-72, gy, layout.paperW+144, 32, 10); sctx.fill();
+  sctx.restore();
+
+  // carriage + pen
+  const liftPx = player.lift*20;
+  const curStroke = strokes[player.idx];
+  const penCol = player.curPen && curStroke ? curStroke.penColor
+    : (curStroke ? curStroke.penColor : [40,40,40]);
+  const [dockCX, dockCY] = g2c(...DOCK());
+  const atDock = Math.hypot(penX-dockCX, penY-dockCY) < 3;
+  sctx.save();
+  sctx.shadowColor="rgba(0,0,0,.45)"; sctx.shadowBlur=10; sctx.shadowOffsetY=4;
+  sctx.fillStyle="#2e3448"; rr(penX-40, penY-72, 80, 56, 12); sctx.fill();
+  sctx.restore();
+  sctx.fillStyle="#ffb020"; sctx.beginPath(); sctx.arc(penX, penY-44, 6, 0, 7); sctx.fill();
+  if(atDock){
+    // carriage is empty — the pen is sitting in the dock tray
+    sctx.strokeStyle="#8d99b5"; sctx.lineWidth=3;
+    sctx.beginPath(); sctx.arc(penX, penY-26, 9, 0, 7); sctx.stroke();
+  } else {
+    // pen body hangs below the carriage, tip liftPx above the paper point
+    const tipY = penY - liftPx;
+    sctx.fillStyle="#e8ecf4"; rr(penX-10, penY-24, 20, Math.max(6,(tipY-14)-(penY-24)), 6); sctx.fill();
+    sctx.fillStyle=rgbCss(penCol); rr(penX-10, penY-24, 20, 15, 6); sctx.fill();
+    sctx.beginPath();
+    sctx.moveTo(penX-9, tipY-14); sctx.lineTo(penX+9, tipY-14); sctx.lineTo(penX, tipY); sctx.closePath(); sctx.fill();
+    if(player.lift<0.3){
+      sctx.fillStyle="rgba(0,0,0,.16)";
+      sctx.beginPath(); sctx.ellipse(penX, penY+5, 15, 5, 0, 0, 7); sctx.fill();
+    }
+  }
+
+  // caption / watermark
+  if(layout.H>layout.W){
+    sctx.save();
+    sctx.shadowColor="rgba(0,0,0,.6)"; sctx.shadowBlur=10;
+    sctx.fillStyle="#fff"; sctx.font="700 46px system-ui"; sctx.textAlign="center";
+    sctx.fillText($("tCaption").value || "", W/2, H-150);
+    sctx.font="600 28px system-ui"; sctx.fillStyle="#aeb8cc";
+    sctx.fillText("PlotterSim", W/2, H-96);
+    sctx.restore();
+  }
+}
+
+/* ---------- main loop ---------- */
+let lastTs = 0;
+function loop(ts){
+  const dt = Math.min(0.05, (ts-lastTs)/1000 || 0); lastTs = ts;
+  if(player && player.playing && !player.done){
+    const spd = recOverrideSpeed ?? speedMul;
+    tick(dt*spd);
+  }
+  drawScene();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+/* ============================================================
+   VIDEO RECORDING (MediaRecorder over the stage canvas)
+   ============================================================ */
+let recording = false, recorder = null, recChunks = [], recMime = "", stopScheduled = false;
+function pickMime(){
+  const cands = ["video/mp4;codecs=avc1.640028,mp4a.40.2","video/mp4",
+                 "video/webm;codecs=vp9","video/webm;codecs=vp8","video/webm"];
+  for(const m of cands){ try{ if(window.MediaRecorder && MediaRecorder.isTypeSupported(m)) return m; }catch(e){} }
+  return "";
+}
+function startRecording(){
+  if(recording) return;
+  if(!window.MediaRecorder){ setStatus("This browser can't record video — try Chrome or Edge."); return; }
+  resetPlayer();
+  const target = parseFloat($("rVidLen").value);
+  recOverrideSpeed = Math.max(0.2, totalAt1x / target);
+  recMime = pickMime();
+  recChunks = []; stopScheduled = false;
+  const stream = stage.captureStream(30);
+  recorder = new MediaRecorder(stream, recMime ? {mimeType:recMime, videoBitsPerSecond:10_000_000}
+                                                : {videoBitsPerSecond:10_000_000});
+  recorder.ondataavailable = e=>{ if(e.data && e.data.size) recChunks.push(e.data); };
+  recorder.onstop = ()=>{
+    recording = false; recOverrideSpeed = null;
+    $("btnRecord").disabled = false; $("btnRecord").textContent = "● Record video";
+    const ext = (recMime||recorder.mimeType||"").includes("mp4") ? "mp4" : "webm";
+    const blob = new Blob(recChunks, {type: recorder.mimeType || "video/webm"});
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `plottersim-${sourceName}.${ext}`;
+    a.click();
+    setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
+    setStatus(`🎬 Video saved — <b>plottersim-${sourceName}.${ext}</b> (~${target}s). Ready to post.`);
+  };
+  recording = true;
+  $("btnRecord").disabled = true; $("btnRecord").textContent = "● Recording…";
+  recorder.start(250);
+  player.playing = true; updatePlayBtn();
+  setStatus(`🎬 Recording… drawing at ${recOverrideSpeed.toFixed(1)}× to land near ${target}s. Don't switch tabs.`);
+}
+function stopRecordingSoon(){
+  if(!recording || stopScheduled) return;
+  stopScheduled = true;
+  setTimeout(()=>{ try{ if(recorder && recorder.state!=="inactive") recorder.stop(); }catch(e){} }, 450);
+}
+
+/* ============================================================
+   CONTROLS
+   ============================================================ */
+function loadImageFile(file){
+  if(!file) return;
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = ()=>{
+    const cap = 1600, s = Math.min(1, cap/Math.max(img.naturalWidth, img.naturalHeight));
+    sourceCanvas = document.createElement("canvas");
+    sourceCanvas.width = Math.round(img.naturalWidth*s);
+    sourceCanvas.height = Math.round(img.naturalHeight*s);
+    sourceCanvas.getContext("2d").drawImage(img,0,0,sourceCanvas.width,sourceCanvas.height);
+    sourceName = (file.name||"image").replace(/\.[^.]+$/,"").replace(/[^\w-]+/g,"-").toLowerCase() || "image";
+    URL.revokeObjectURL(url);
+    analyze();
+    setStatus(`Loaded <b>${file.name}</b> — press Play, or Record to make the video.`);
+  };
+  img.onerror = ()=> setStatus("Couldn't read that image file.");
+  img.src = url;
+}
+$("file").addEventListener("change", e=>loadImageFile(e.target.files[0]));
+$("drop").addEventListener("click", ()=>$("file").click());
+for(const ev of ["dragover","dragenter"]) window.addEventListener(ev, e=>{ e.preventDefault(); $("drop").classList.add("over"); });
+for(const ev of ["dragleave","drop"]) window.addEventListener(ev, e=>{ e.preventDefault(); $("drop").classList.remove("over"); });
+window.addEventListener("drop", e=>{ const f = e.dataTransfer.files && e.dataTransfer.files[0]; if(f) loadImageFile(f); });
+document.querySelectorAll("[data-sample]").forEach(b=>b.addEventListener("click", ()=>{
+  sourceCanvas = makeSample(b.dataset.sample); sourceName = "demo-"+b.dataset.sample; analyze();
+}));
+
+let reTimer = null;
+function scheduleRebuild(){
+  $("oColors").textContent = $("rColors").value;
+  $("oMarker").textContent = $("rMarker").value;
+  clearTimeout(reTimer); reTimer = setTimeout(analyze, 280);
+}
+for(const id of ["rColors","rMarker"]) $(id).addEventListener("input", scheduleRebuild);
+for(const id of ["sFill","sOutline","cWhite","cPhoto","sDetail"]) $(id).addEventListener("change", scheduleRebuild);
+$("rSpeed").addEventListener("input", ()=>{
+  speedMul = parseFloat($("rSpeed").value);
+  $("oSpeed").textContent = speedMul+"×";
+});
+$("rVidLen").addEventListener("input", ()=>{ $("oVidLen").textContent = $("rVidLen").value+"s"; });
+$("sFormat").addEventListener("change", ()=>computeLayout());
+
+$("btnPlay").addEventListener("click", ()=>{
+  if(player.done) resetPlayer();
+  player.playing = !player.playing; updatePlayBtn();
+});
+$("btnRestart").addEventListener("click", ()=>{ resetPlayer(); player.playing=true; updatePlayBtn(); });
+$("btnFinish").addEventListener("click", ()=>{
+  if(!player) return;
+  while(player.idx < strokes.length){ drawStrokeToArt(strokes[player.idx], strokes[player.idx].pts); player.idx++; }
+  finishPlayback();
+});
+$("btnRecord").addEventListener("click", startRecording);
+$("btnPng").addEventListener("click", ()=>{
+  const keepPos = player.pos, keepPartial = player.partial;
+  player.pos = DOCK(); player.partial = null; player.lift = 1;
+  drawScene();
+  stage.toBlob(b=>{
+    const a=document.createElement("a");
+    a.href=URL.createObjectURL(b); a.download=`plottersim-${sourceName}.png`; a.click();
+    setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
+  });
+  player.pos = keepPos; player.partial = keepPartial;
+});
+
+/* ---------- init: start with the star demo, ready to play ---------- */
+$("oColors").textContent = $("rColors").value;
+$("oMarker").textContent = $("rMarker").value;
+sourceCanvas = makeSample("star");
+sourceName = "demo-star";
+analyze();
+// shareable links: ?sample=berry&autoplay=1  or  ?finish=1 for the final frame
+const qs = new URLSearchParams(location.search);
+if(qs.get("sample") && ["star","berry","rocket","landscape"].includes(qs.get("sample"))){
+  sourceCanvas = makeSample(qs.get("sample")); sourceName = "demo-"+qs.get("sample"); analyze();
+}
+if(qs.get("finish")==="1") $("btnFinish").click();
+else if(qs.get("testplay")==="1"){
+  // deterministic full playthrough of the state machine (test hook)
+  let guard=0; while(!player.done && guard++<400000) tick(0.05);
+}
+else if(qs.get("autoplay")==="1"){ player.playing = true; updatePlayBtn(); }
+</script>
+</body>
+</html>
