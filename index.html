@@ -431,11 +431,46 @@ function majorityFilter(labels, W, H, passes){
   labels.set(dst);
 }
 
+function probeImage(){
+  // Tiny 160px probe: is this monochrome? Is it bimodal B&W line art?
+  const c = document.createElement("canvas");
+  const s = Math.min(1, 160/Math.max(sourceCanvas.width, sourceCanvas.height));
+  c.width = Math.max(2, Math.round(sourceCanvas.width*s));
+  c.height = Math.max(2, Math.round(sourceCanvas.height*s));
+  const x = c.getContext("2d", {willReadFrequently:true});
+  x.drawImage(sourceCanvas,0,0,c.width,c.height);
+  const d = x.getImageData(0,0,c.width,c.height).data;
+  let n=0, mono=0, dark=0, light=0;
+  for(let p=0;p<c.width*c.height;p+=2){
+    const i=p*4; if(d[i+3]<140) continue;
+    n++;
+    const mx=Math.max(d[i],d[i+1],d[i+2]), mn=Math.min(d[i],d[i+1],d[i+2]);
+    if(mx-mn<=14) mono++;
+    const lum=0.2126*d[i]+0.7152*d[i+1]+0.0722*d[i+2];
+    if(lum<70) dark++; else if(lum>205) light++;
+  }
+  const monoFrac = n? mono/n : 0, darkFrac = n? dark/n : 0, lightFrac = n? light/n : 0;
+  return { mono: monoFrac>0.92,
+           lineArt: monoFrac>0.92 && (darkFrac+lightFrac)>0.9 && darkFrac>0.03 && lightFrac>0.3 };
+}
+
+function dropIsolatedSpecks(labels, W, H, minPx){
+  // ink islands smaller than minPx with no neighbouring region = scanner dust
+  const {comps} = labelComponents(labels, W, H);
+  for(const c of comps){
+    if(c.size<minPx && c.neighbours.size===0)
+      for(const p of c.pixels) labels[p]=-1;
+  }
+}
+
 function analyze(){
   if(!sourceCanvas) return;
   const photoMode = $("cPhoto").checked;
   const detail = $("sDetail").value;
-  const maxDim = photoMode ? 440 : 380;
+  const probe = probeImage();
+  const lineArt = probe.lineArt;
+  const mono = probe.mono;
+  const maxDim = lineArt ? 720 : mono ? 560 : photoMode ? 512 : 560;
   const sw = sourceCanvas.width, sh = sourceCanvas.height;
   const scale = Math.min(1, maxDim/Math.max(sw,sh));
   const W = Math.max(8, Math.round(sw*scale)), H = Math.max(8, Math.round(sh*scale));
@@ -443,7 +478,7 @@ function analyze(){
   const work = document.createElement("canvas"); work.width=W; work.height=H;
   const wx = work.getContext("2d", {willReadFrequently:true});
   wx.imageSmoothingEnabled = true; wx.imageSmoothingQuality = "high";
-  if(photoMode){
+  if(photoMode && !mono){
     // extra smoothing pass: shrink to half and back up = cheap photo blur,
     // kills sensor noise/JPEG speckle before quantization
     const half = document.createElement("canvas");
@@ -456,6 +491,27 @@ function analyze(){
     wx.drawImage(sourceCanvas,0,0,W,H);
   }
   const img = wx.getImageData(0,0,W,H), data = img.data;
+
+  if(lineArt){
+    // ---- Black & white line art: ONE ink pen, hard threshold, all white
+    // is paper (faces stay clean), no photo smoothing, no region merging.
+    const paletteLA = [[22,20,20]];
+    const labelsLA = new Int16Array(W*H).fill(-1);
+    for(let p=0;p<W*H;p++){
+      const i=p*4; if(data[i+3]<140) continue;
+      const lum = 0.2126*data[i] + 0.7152*data[i+1] + 0.0722*data[i+2];
+      if(lum < 175) labelsLA[p]=0;
+    }
+    dropIsolatedSpecks(labelsLA, W, H, 6);
+    grid = {W,H,labels:labelsLA,palette:paletteLA,lineArt:true};
+    renderPreview();
+    const regions = labelComponents(labelsLA, W, H).comps.length;
+    $("regionInfo").textContent =
+      `Detected black & white line art — 1 ink pen · ${regions} ink regions · full-detail ${W}×${H} grid (photo simplifier bypassed).`;
+    buildStrokes();
+    return;
+  }
+
   const whitePaper = $("cWhite").checked;
   const isWhiteRaw = p => data[p*4]>242 && data[p*4+1]>242 && data[p*4+2]>242 && data[p*4+3]>=140;
   // White counts as paper ONLY where it is connected to the image border
@@ -487,7 +543,8 @@ function analyze(){
   }
   let nColors = parseInt($("rColors").value,10);
   if(photoMode && detail==="relaxed") nColors = Math.min(nColors, 10);
-  const palette = medianCutPalette(samples, nColors);
+  let palette = medianCutPalette(samples, nColors);
+  if(mono) palette = palette.map(c=>{ const g=Math.round(0.2126*c[0]+0.7152*c[1]+0.0722*c[2]); return [g,g,g]; });
 
   // assign nearest palette colour
   const labels = new Int16Array(W*H).fill(-1);
@@ -692,7 +749,7 @@ function buildStrokes(){
       const ptsList = fillStrokesForMask(masks[ci], W, H, markerW, ang, rng);
       for(const pts of ptsList){
         list.push({pts, color:rgbCss(palette[ci]), penColor:palette[ci], width:markerW,
-          alpha: pass===0 ? 0.86 : 0.5, type:"fill",
+          alpha: pass===0 ? (grid.lineArt ? 0.97 : 0.86) : 0.5, type:"fill",
           penId:"f"+ci+(pass?"x":""), len:strokeLen(pts), ci});
       }
     });
@@ -1068,22 +1125,31 @@ function stopRecordingSoon(){
 /* ============================================================
    CONTROLS
    ============================================================ */
+function setSourceFromImage(img, name){
+  const cap = 2000, s = Math.min(1, cap/Math.max(img.naturalWidth, img.naturalHeight));
+  sourceCanvas = document.createElement("canvas");
+  sourceCanvas.width = Math.round(img.naturalWidth*s);
+  sourceCanvas.height = Math.round(img.naturalHeight*s);
+  sourceCanvas.getContext("2d").drawImage(img,0,0,sourceCanvas.width,sourceCanvas.height);
+  sourceName = (name||"image").replace(/\.[^.]+$/,"").replace(/[^\w-]+/g,"-").toLowerCase() || "image";
+  analyze();
+}
 function loadImageFile(file){
   if(!file) return;
   const url = URL.createObjectURL(file);
   const img = new Image();
   img.onload = ()=>{
-    const cap = 1600, s = Math.min(1, cap/Math.max(img.naturalWidth, img.naturalHeight));
-    sourceCanvas = document.createElement("canvas");
-    sourceCanvas.width = Math.round(img.naturalWidth*s);
-    sourceCanvas.height = Math.round(img.naturalHeight*s);
-    sourceCanvas.getContext("2d").drawImage(img,0,0,sourceCanvas.width,sourceCanvas.height);
-    sourceName = (file.name||"image").replace(/\.[^.]+$/,"").replace(/[^\w-]+/g,"-").toLowerCase() || "image";
+    setSourceFromImage(img, file.name);
     URL.revokeObjectURL(url);
-    analyze();
     setStatus(`Loaded <b>${file.name}</b> — press Play, or Record to make the video.`);
   };
   img.onerror = ()=> setStatus("Couldn't read that image file.");
+  img.src = url;
+}
+function loadImageFromUrl(url, name){
+  const img = new Image();
+  img.onload = ()=>{ setSourceFromImage(img, name||"image"); };
+  img.onerror = ()=> setStatus("Couldn't load that image URL.");
   img.src = url;
 }
 $("file").addEventListener("change", e=>loadImageFile(e.target.files[0]));
@@ -1141,21 +1207,30 @@ sourceName = "demo-star";
 analyze();
 // shareable links: ?sample=berry&autoplay=1  or  ?finish=1 for the final frame
 const qs = new URLSearchParams(location.search);
-if(qs.get("sample") && ["star","berry","rocket","landscape"].includes(qs.get("sample"))){
-  sourceCanvas = makeSample(qs.get("sample")); sourceName = "demo-"+qs.get("sample"); analyze();
+function applyQs(){
+  if(qs.get("sample") && ["star","berry","rocket","landscape"].includes(qs.get("sample"))){
+    sourceCanvas = makeSample(qs.get("sample")); sourceName = "demo-"+qs.get("sample"); analyze();
+  }
+  if(qs.get("frameAt")!==null){
+    // deterministic frame export: simulate to exactly this many seconds
+    const target = parseFloat(qs.get("frameAt"))||0;
+    let t=0; let g2=0;
+    while(t<target && !player.done && g2++<20000){ tick(1/30); t+=1/30; }
+  }
+  if(qs.get("finish")==="1") $("btnFinish").click();
+  else if(qs.get("testplay")==="1"){
+    // deterministic full playthrough of the state machine (test hook)
+    let guard=0; while(!player.done && guard++<400000) tick(0.05);
+  }
+  else if(qs.get("autoplay")==="1"){ player.playing = true; updatePlayBtn(); }
 }
-if(qs.get("frameAt")!==null){
-  // deterministic frame export: simulate to exactly this many seconds
-  const target = parseFloat(qs.get("frameAt"))||0;
-  let t=0; let g2=0;
-  while(t<target && !player.done && g2++<20000){ tick(1/30); t+=1/30; }
-}
-if(qs.get("finish")==="1") $("btnFinish").click();
-else if(qs.get("testplay")==="1"){
-  // deterministic full playthrough of the state machine (test hook)
-  let guard=0; while(!player.done && guard++<400000) tick(0.05);
-}
-else if(qs.get("autoplay")==="1"){ player.playing = true; updatePlayBtn(); }
+if(qs.get("img")){
+  // ?img=<url> — load an image by URL, then apply the other params
+  const imgEl = new Image();
+  imgEl.onload = ()=>{ setSourceFromImage(imgEl, qs.get("img").split("/").pop()); applyQs(); };
+  imgEl.onerror = ()=>applyQs();
+  imgEl.src = qs.get("img");
+} else applyQs();
 </script>
 </body>
 </html>

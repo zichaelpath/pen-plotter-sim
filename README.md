@@ -38,6 +38,10 @@ The simplified preview in the side panel shows you exactly what the plotter will
 | Recorded video length | 8–60 s — recording auto-speeds the drawing to fit |
 | Caption | Text burned into portrait videos |
 
+## Black & white line art is auto-detected
+
+If an image is (nearly) pure black & white line art — manga, ink drawings, logos — PlotterSim switches to **line-art mode** on its own: a single ink pen, a hard ink threshold, all white treated as paper (so faces stay clean), the photo simplifier bypassed, and a full-detail 720px working grid so thin lines and eyes survive. No settings to change — just drop the image in.
+
 ## How it works (under the hood)
 
 - **Outlines:** marching-squares contour tracing on each colour mask, chained into polylines.
